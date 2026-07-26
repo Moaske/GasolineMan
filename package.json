@@ -1,0 +1,52 @@
+{
+    "author": "Moaske",
+    "dependencies": {},
+    "keywords": [],
+    "name": "gasolineman",
+    "pebble": {
+        "capabilities": [
+            "configurable"
+        ],
+        "displayName": "GasolineMan",
+        "enableMultiJS": true,
+        "messageKeys": [
+            "REFRESH",
+            "HIST1",
+            "HIST2",
+            "HIST3"
+        ],
+        "projectType": "native",
+        "resources": {
+            "media": [
+                {
+                    "file": "images/icon_refresh.png",
+                    "name": "ICON_REFRESH",
+                    "targetPlatforms": null,
+                    "type": "bitmap"
+                },
+                {
+                    "file": "images/gasstation_app_icon.png",
+                    "menuIcon": true,
+                    "name": "GASSTATION_APP_ICON",
+                    "targetPlatforms": null,
+                    "type": "bitmap"
+                },
+                {
+                    "file": "images/icon_graph.png",
+                    "name": "ICON_GRAPH",
+                    "targetPlatforms": null,
+                    "type": "bitmap"
+                }
+            ]
+        },
+        "sdkVersion": "3",
+        "targetPlatforms": [
+            "emery"
+        ],
+        "uuid": "6a879b90-4d9d-4962-970e-d67d8a07034e",
+        "watchapp": {
+            "watchface": false
+        }
+    },
+    "version": "1.0.0"
+}
