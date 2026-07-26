@@ -9,19 +9,20 @@ static ActionBarLayer *s_action_bar;
 
 static Layer *s_label1_bg, *s_label2_bg, *s_label3_bg;
 static TextLayer *s_label1, *s_label2, *s_label3;
-static TextLayer *s_price1, *s_price2, *s_price3;
-
-static char s_price1_buf[16];
-static char s_price2_buf[16];
-static char s_price3_buf[16];
+static Layer *s_price1, *s_price2, *s_price3;
 
 static GBitmap *s_icon_refresh;
 static GBitmap *s_icon_graph;
 
+#define PRICE_UNIT_TEXT "\u20AC/L"
+#define PRICE_FONT_BIG FONT_KEY_BITHAM_30_BLACK
+#define PRICE_FONT_UNIT FONT_KEY_GOTHIC_18_BOLD
+
 // ---- helpers ----
 
-// Formats a price stored as (euros * 1000) into "€1,879" style text (Dutch decimal comma).
-// A value of 0 means "no data yet".
+// Formats a price stored as (euros * 1000) into "1,879" style text (Dutch decimal
+// comma), just the number - the €/L unit is drawn separately, smaller. A value
+// of 0 means "no data yet".
 static void format_price(uint16_t value, char *buf, size_t buf_len) {
   if (value == 0) {
     snprintf(buf, buf_len, "--,---");
@@ -29,7 +30,7 @@ static void format_price(uint16_t value, char *buf, size_t buf_len) {
   }
   int euros = value / PRICE_SCALE;
   int frac = value % PRICE_SCALE;
-  snprintf(buf, buf_len, "\u20AC%d,%03d", euros, frac);
+  snprintf(buf, buf_len, "%d,%03d", euros, frac);
 }
 
 static void colored_bg_update_proc(Layer *layer, GContext *ctx) {
@@ -57,15 +58,42 @@ static TextLayer *make_label(Layer *bg, GRect frame, const char *text) {
   return tl;
 }
 
-static TextLayer *make_price(Layer *parent, GRect frame) {
-  TextLayer *tl = text_layer_create(frame);
-  text_layer_set_text(tl, "--,---");
-  text_layer_set_background_color(tl, GColorClear);
-  text_layer_set_text_color(tl, GColorBlack);
-  text_layer_set_font(tl, fonts_get_system_font(FONT_KEY_LECO_32_BOLD_NUMBERS));
-  text_layer_set_text_alignment(tl, GTextAlignmentCenter);
-  layer_add_child(parent, text_layer_get_layer(tl));
-  return tl;
+// Draws "<number>" big & bold, followed immediately by a smaller, non-bold
+// "€/L", the pair centered together as one group within the row.
+static void price_row_update_proc(Layer *layer, GContext *ctx) {
+  char *num_str = (char *)layer_get_data(layer);
+  GRect bounds = layer_get_bounds(layer);
+
+  GFont big_font = fonts_get_system_font(PRICE_FONT_BIG);
+  GFont unit_font = fonts_get_system_font(PRICE_FONT_UNIT);
+
+  GRect measure_box = GRect(0, 0, 300, 60);
+  GSize num_size = graphics_text_layout_get_content_size(
+      num_str, big_font, measure_box, GTextOverflowModeFill, GTextAlignmentLeft);
+  GSize unit_size = graphics_text_layout_get_content_size(
+      PRICE_UNIT_TEXT, unit_font, measure_box, GTextOverflowModeFill, GTextAlignmentLeft);
+
+  int gap = 4;
+  int total_w = num_size.w + gap + unit_size.w;
+  int start_x = (bounds.size.w - total_w) / 2;
+  int num_y = (bounds.size.h - num_size.h) / 2;
+  int unit_y = num_y + num_size.h - unit_size.h; // sit on the same baseline as the number
+
+  graphics_context_set_text_color(ctx, GColorBlack);
+
+  GRect num_rect = GRect(start_x, num_y, num_size.w, num_size.h);
+  graphics_draw_text(ctx, num_str, big_font, num_rect, GTextOverflowModeFill, GTextAlignmentLeft, NULL);
+
+  GRect unit_rect = GRect(start_x + num_size.w + gap, unit_y, unit_size.w, unit_size.h);
+  graphics_draw_text(ctx, PRICE_UNIT_TEXT, unit_font, unit_rect, GTextOverflowModeFill, GTextAlignmentLeft, NULL);
+}
+
+static Layer *make_price(Layer *parent, GRect frame) {
+  Layer *l = layer_create_with_data(frame, 16);
+  strcpy((char *)layer_get_data(l), "--,---");
+  layer_set_update_proc(l, price_row_update_proc);
+  layer_add_child(parent, l);
+  return l;
 }
 
 // ---- click handlers ----
@@ -137,9 +165,9 @@ static void main_window_unload(Window *window) {
   text_layer_destroy(s_label1);
   text_layer_destroy(s_label2);
   text_layer_destroy(s_label3);
-  text_layer_destroy(s_price1);
-  text_layer_destroy(s_price2);
-  text_layer_destroy(s_price3);
+  layer_destroy(s_price1);
+  layer_destroy(s_price2);
+  layer_destroy(s_price3);
   layer_destroy(s_label1_bg);
   layer_destroy(s_label2_bg);
   layer_destroy(s_label3_bg);
@@ -153,12 +181,16 @@ void main_window_push(void) {
 }
 
 static void refresh_price_labels(void) {
-  format_price(g_history[0][NUM_DAYS - 1], s_price1_buf, sizeof(s_price1_buf));
-  format_price(g_history[1][NUM_DAYS - 1], s_price2_buf, sizeof(s_price2_buf));
-  format_price(g_history[2][NUM_DAYS - 1], s_price3_buf, sizeof(s_price3_buf));
-  text_layer_set_text(s_price1, s_price1_buf);
-  text_layer_set_text(s_price2, s_price2_buf);
-  text_layer_set_text(s_price3, s_price3_buf);
+  char buf[16];
+
+  format_price(g_history[0][NUM_DAYS - 1], buf, sizeof(buf));
+  strncpy((char *)layer_get_data(s_price1), buf, 15);
+
+  format_price(g_history[1][NUM_DAYS - 1], buf, sizeof(buf));
+  strncpy((char *)layer_get_data(s_price2), buf, 15);
+
+  format_price(g_history[2][NUM_DAYS - 1], buf, sizeof(buf));
+  strncpy((char *)layer_get_data(s_price3), buf, 15);
 }
 
 // ---- AppMessage ----
@@ -218,8 +250,9 @@ static void init(void) {
 
   main_window_push();
 
-  // Kick off an initial fetch so data appears without waiting for a manual refresh.
-  request_refresh();
+  // No need to request a refresh here: the phone's PebbleKit JS fires its
+  // own fetch-and-send as soon as it becomes ready. Requesting one here too
+  // caused two AppMessage sends to race each other (APP_MSG_BUSY / nack).
 }
 
 static void deinit(void) {

@@ -52,6 +52,10 @@ function fetchDailyHistory(cfg, entityId, callback) {
       if (xhr.status >= 200 && xhr.status < 300) {
         var data = JSON.parse(xhr.responseText);
         var series = (data && data[0]) ? data[0] : [];
+        if (series.length === 0) {
+          console.log('No history returned for "' + entityId + '" - check the entity ID ' +
+            'is exactly right (Developer Tools > States in HA) and that it has recorder history.');
+        }
 
         // Build day-bucket boundaries: dayStart[i] = midnight, i days before today (i = NUM_DAYS-1 .. 0)
         var todayMidnight = new Date(end.getFullYear(), end.getMonth(), end.getDate());
@@ -116,12 +120,21 @@ function sendToWatch(hist1, hist2, hist3) {
   });
 }
 
+var refreshInFlight = false;
+
 function refreshAndSend() {
+  if (refreshInFlight) {
+    console.log('Refresh already in progress, ignoring extra request');
+    return;
+  }
+  refreshInFlight = true;
+
   var cfg = loadSettings();
   fetchDailyHistory(cfg, cfg.sensor1, function (h1) {
     fetchDailyHistory(cfg, cfg.sensor2, function (h2) {
       fetchDailyHistory(cfg, cfg.sensor3, function (h3) {
         sendToWatch(h1, h2, h3);
+        refreshInFlight = false;
       });
     });
   });

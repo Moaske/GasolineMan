@@ -48,8 +48,8 @@ static void draw_axes(GContext *ctx, GRect plot_area) {
 
   // Y axis labels: €1,00 / €2,00 / €3,00 with light gridlines
   const uint16_t ticks[3] = {1000, 2000, 3000};
-  const char *labels[3] = {"1,00", "2,00", "3,00"};
-  GFont font = fonts_get_system_font(FONT_KEY_GOTHIC_14);
+  const char *labels[3] = {"€1,00", "€2,00", "€3,00"};
+  GFont font = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
 
   for (int i = 0; i < 3; i++) {
     int16_t y = y_for_price(ticks[i], plot_area);
@@ -108,7 +108,7 @@ static void graph_layer_update_proc(Layer *layer, GContext *ctx) {
   // X axis caption
   graphics_context_set_text_color(ctx, GColorBlack);
   GRect caption = GRect(plot_area.origin.x, bounds.size.h - MARGIN_BOTTOM + 1, plot_area.size.w, MARGIN_BOTTOM - 1);
-  graphics_draw_text(ctx, "last 30 days", fonts_get_system_font(FONT_KEY_GOTHIC_14),
+  graphics_draw_text(ctx, "last 30 days", fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD),
                       caption, GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
 }
 
