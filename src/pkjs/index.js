@@ -21,79 +21,141 @@ function saveSettings(cfg) {
   localStorage.setItem('sensor3', cfg.sensor3 || '');
 }
 
-// ---- HA history fetch ----
+// ---- day-bucket helpers ----
 
-// Fetches HA history for one entity over the last NUM_DAYS days and reduces it
-// to one price-per-day array (most recent known state on/ before each day,
-// 0 if nothing was recorded yet for that day).
-function fetchDailyHistory(cfg, entityId, callback) {
-  if (!cfg.haUrl || !cfg.haToken || !entityId) {
-    callback(new Array(NUM_DAYS).fill(0));
+function startOfDay(d) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+// HA has returned the stat bucket's "start" as either an ISO string or an
+// epoch number (seconds in some versions, ms in others) depending on version -
+// handle all three.
+function parseStatTime(raw) {
+  if (typeof raw === 'number') {
+    return new Date(raw < 1e12 ? raw * 1000 : raw);
+  }
+  return new Date(raw);
+}
+
+// ---- long-term statistics over WebSocket (same approach as BP Diary) ----
+
+// Fetches one €-price-per-day array (0 = no data for that day) for each of the
+// given entity IDs in a single WebSocket round trip, using HA's long-term
+// statistics tables rather than the short-retention raw states table.
+function fetchStatsHistory(cfg, entityIds, callback) {
+  var results = {};
+  entityIds.forEach(function (id) {
+    if (id) results[id] = new Array(NUM_DAYS).fill(0);
+  });
+
+  var validIds = entityIds.filter(function (id) { return !!id; });
+  if (!cfg.haUrl || !cfg.haToken || validIds.length === 0) {
+    callback(results);
     return;
   }
 
-  var end = new Date();
-  var start = new Date(end.getTime() - NUM_DAYS * 24 * 60 * 60 * 1000);
+  var wsUrl = cfg.haUrl.replace(/^http/, 'ws') + '/api/websocket';
+  var ws;
+  var settled = false;
+  var msgId = 1;
 
-  var url = cfg.haUrl + '/api/history/period/' + start.toISOString() +
-    '?filter_entity_id=' + encodeURIComponent(entityId) +
-    '&end_time=' + encodeURIComponent(end.toISOString()) +
-    '&minimal_response';
+  var timeout = setTimeout(function () {
+    if (settled) return;
+    settled = true;
+    console.log('HA websocket timed out');
+    try { ws.close(); } catch (e) {}
+    callback(results);
+  }, 15000);
 
-  var xhr = new XMLHttpRequest();
-  xhr.open('GET', url, true);
-  xhr.setRequestHeader('Authorization', 'Bearer ' + cfg.haToken);
-  xhr.setRequestHeader('Content-Type', 'application/json');
-  xhr.timeout = 15000;
+  function finish() {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timeout);
+    try { ws.close(); } catch (e) {}
+    callback(results);
+  }
 
-  xhr.onload = function () {
-    var daily = new Array(NUM_DAYS).fill(0);
+  try {
+    ws = new WebSocket(wsUrl);
+  } catch (e) {
+    console.log('Could not open HA websocket: ' + e);
+    finish();
+    return;
+  }
+
+  ws.onerror = function () {
+    console.log('HA websocket error');
+    finish();
+  };
+
+  ws.onclose = function () {
+    finish();
+  };
+
+  ws.onmessage = function (evt) {
+    var msg;
     try {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        var data = JSON.parse(xhr.responseText);
-        var series = (data && data[0]) ? data[0] : [];
-        if (series.length === 0) {
-          console.log('No history returned for "' + entityId + '" - check the entity ID ' +
-            'is exactly right (Developer Tools > States in HA) and that it has recorder history.');
-        }
-
-        // Build day-bucket boundaries: dayStart[i] = midnight, i days before today (i = NUM_DAYS-1 .. 0)
-        var todayMidnight = new Date(end.getFullYear(), end.getMonth(), end.getDate());
-        var lastKnown = 0;
-        var seriesIdx = 0;
-
-        for (var i = 0; i < NUM_DAYS; i++) {
-          var dayEnd = new Date(todayMidnight.getTime() - (NUM_DAYS - 1 - i) * 24 * 60 * 60 * 1000 + 24 * 60 * 60 * 1000 - 1);
-
-          while (seriesIdx < series.length) {
-            var point = series[seriesIdx];
-            var t = new Date(point.last_changed || point.last_updated);
-            if (t.getTime() <= dayEnd.getTime()) {
-              var v = parseFloat(point.state);
-              if (!isNaN(v)) {
-                lastKnown = Math.round(v * PRICE_SCALE);
-              }
-              seriesIdx++;
-            } else {
-              break;
-            }
-          }
-          daily[i] = lastKnown;
-        }
-      }
+      msg = JSON.parse(evt.data);
     } catch (e) {
-      console.log('History parse error for ' + entityId + ': ' + e);
+      return;
     }
-    callback(daily);
-  };
 
-  xhr.onerror = function () {
-    console.log('History request failed for ' + entityId);
-    callback(new Array(NUM_DAYS).fill(0));
-  };
-  xhr.ontimeout = xhr.onerror;
+    if (msg.type === 'auth_required') {
+      ws.send(JSON.stringify({ type: 'auth', access_token: cfg.haToken }));
+      return;
+    }
 
-  xhr.send();
+    if (msg.type === 'auth_invalid') {
+      console.log('HA websocket auth failed - check the Long-Lived Access Token');
+      finish();
+      return;
+    }
+
+    if (msg.type === 'auth_ok') {
+      var end = new Date();
+      var start = new Date(startOfDay(end) - (NUM_DAYS - 1) * 24 * 60 * 60 * 1000);
+
+      ws.send(JSON.stringify({
+        id: msgId,
+        type: 'recorder/statistics_during_period',
+        start_time: start.toISOString(),
+        end_time: end.toISOString(),
+        statistic_ids: validIds,
+        period: 'day',
+        types: ['mean']
+      }));
+      return;
+    }
+
+    if (msg.type === 'result' && msg.id === msgId) {
+      if (!msg.success) {
+        console.log('HA statistics request failed: ' + JSON.stringify(msg.error));
+        finish();
+        return;
+      }
+
+      var today0 = startOfDay(new Date());
+
+      validIds.forEach(function (id) {
+        var points = (msg.result && msg.result[id]) ? msg.result[id] : [];
+        if (points.length === 0) {
+          console.log('No long-term statistics for "' + id + '" - it likely needs ' +
+            '"state_class: measurement" set so HA starts building history for it.');
+          return;
+        }
+        points.forEach(function (p) {
+          if (typeof p.mean !== 'number') return;
+          var dayStart = startOfDay(parseStatTime(p.start));
+          var dayIndex = Math.round((dayStart - today0) / (24 * 60 * 60 * 1000)) + (NUM_DAYS - 1);
+          if (dayIndex >= 0 && dayIndex < NUM_DAYS) {
+            results[id][dayIndex] = Math.round(p.mean * PRICE_SCALE);
+          }
+        });
+      });
+
+      finish();
+    }
+  };
 }
 
 function toByteArray(dailyPrices) {
@@ -130,13 +192,14 @@ function refreshAndSend() {
   refreshInFlight = true;
 
   var cfg = loadSettings();
-  fetchDailyHistory(cfg, cfg.sensor1, function (h1) {
-    fetchDailyHistory(cfg, cfg.sensor2, function (h2) {
-      fetchDailyHistory(cfg, cfg.sensor3, function (h3) {
-        sendToWatch(h1, h2, h3);
-        refreshInFlight = false;
-      });
-    });
+  var ids = [cfg.sensor1, cfg.sensor2, cfg.sensor3];
+
+  fetchStatsHistory(cfg, ids, function (results) {
+    var h1 = results[cfg.sensor1] || new Array(NUM_DAYS).fill(0);
+    var h2 = results[cfg.sensor2] || new Array(NUM_DAYS).fill(0);
+    var h3 = results[cfg.sensor3] || new Array(NUM_DAYS).fill(0);
+    sendToWatch(h1, h2, h3);
+    refreshInFlight = false;
   });
 }
 
