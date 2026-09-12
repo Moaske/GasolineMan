@@ -13,7 +13,13 @@
             "REFRESH",
             "HIST1",
             "HIST2",
-            "HIST3"
+            "HIST3",
+            "LABEL1",
+            "LABEL2",
+            "LABEL3",
+            "COLOR1",
+            "COLOR2",
+            "COLOR3"
         ],
         "projectType": "native",
         "resources": {
@@ -25,15 +31,15 @@
                     "type": "bitmap"
                 },
                 {
-                    "file": "images/gasstation_app_icon.png",
-                    "menuIcon": true,
-                    "name": "GASSTATION_APP_ICON",
+                    "file": "images/icon_graph.png",
+                    "name": "ICON_GRAPH",
                     "targetPlatforms": null,
                     "type": "bitmap"
                 },
                 {
-                    "file": "images/icon_graph.png",
-                    "name": "ICON_GRAPH",
+                    "file": "images/gasstation_app_icon.png",
+                    "menuIcon": true,
+                    "name": "GASSTATION_APP_ICON",
                     "targetPlatforms": null,
                     "type": "bitmap"
                 }
@@ -48,5 +54,5 @@
             "watchface": false
         }
     },
-    "version": "1.1.0"
+    "version": "1.2.0"
 }

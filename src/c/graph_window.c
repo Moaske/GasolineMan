@@ -19,9 +19,9 @@ static Layer *s_graph_layer;
 
 static GColor sensor_color(int idx) {
   switch (idx) {
-    case 0: return COLOR_SENSOR_1;
-    case 1: return COLOR_SENSOR_2;
-    default: return COLOR_SENSOR_3;
+    case 0: return g_color1;
+    case 1: return g_color2;
+    default: return g_color3;
   }
 }
 

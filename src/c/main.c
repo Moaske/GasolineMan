@@ -3,6 +3,21 @@
 // ---- shared cache ----
 uint16_t g_history[3][NUM_DAYS];
 
+char g_label1[LABEL_BUF_LEN];
+char g_label2[LABEL_BUF_LEN];
+char g_label3[LABEL_BUF_LEN];
+GColor g_color1;
+GColor g_color2;
+GColor g_color3;
+
+// ---- persistent storage keys ----
+#define PKEY_LABEL1 1
+#define PKEY_LABEL2 2
+#define PKEY_LABEL3 3
+#define PKEY_COLOR1 4
+#define PKEY_COLOR2 5
+#define PKEY_COLOR3 6
+
 // ---- main window widgets ----
 static Window *s_main_window;
 static ActionBarLayer *s_action_bar;
@@ -17,6 +32,36 @@ static GBitmap *s_icon_graph;
 #define PRICE_UNIT_TEXT "\u20AC/L"
 #define PRICE_FONT_BIG FONT_KEY_BITHAM_30_BLACK
 #define PRICE_FONT_UNIT FONT_KEY_GOTHIC_18_BOLD
+
+// ---- persisted settings ----
+
+static void load_persisted_settings(void) {
+  if (persist_exists(PKEY_LABEL1)) {
+    persist_read_string(PKEY_LABEL1, g_label1, LABEL_BUF_LEN);
+  } else {
+    strncpy(g_label1, DEFAULT_LABEL_1, LABEL_BUF_LEN - 1);
+    g_label1[LABEL_BUF_LEN - 1] = '\0';
+  }
+  if (persist_exists(PKEY_LABEL2)) {
+    persist_read_string(PKEY_LABEL2, g_label2, LABEL_BUF_LEN);
+  } else {
+    strncpy(g_label2, DEFAULT_LABEL_2, LABEL_BUF_LEN - 1);
+    g_label2[LABEL_BUF_LEN - 1] = '\0';
+  }
+  if (persist_exists(PKEY_LABEL3)) {
+    persist_read_string(PKEY_LABEL3, g_label3, LABEL_BUF_LEN);
+  } else {
+    strncpy(g_label3, DEFAULT_LABEL_3, LABEL_BUF_LEN - 1);
+    g_label3[LABEL_BUF_LEN - 1] = '\0';
+  }
+
+  g_color1 = persist_exists(PKEY_COLOR1)
+      ? (GColor){ .argb = (uint8_t)persist_read_int(PKEY_COLOR1) } : DEFAULT_COLOR_1;
+  g_color2 = persist_exists(PKEY_COLOR2)
+      ? (GColor){ .argb = (uint8_t)persist_read_int(PKEY_COLOR2) } : DEFAULT_COLOR_2;
+  g_color3 = persist_exists(PKEY_COLOR3)
+      ? (GColor){ .argb = (uint8_t)persist_read_int(PKEY_COLOR3) } : DEFAULT_COLOR_3;
+}
 
 // ---- helpers ----
 
@@ -58,7 +103,7 @@ static TextLayer *make_label(Layer *bg, GRect frame, const char *text) {
   return tl;
 }
 
-// Draws "<number>" big & bold, followed immediately by a smaller, non-bold
+// Draws "<number>" big & bold, followed immediately by a smaller bold
 // "€/L", the pair centered together as one group within the row.
 static void price_row_update_proc(Layer *layer, GContext *ctx) {
   char *num_str = (char *)layer_get_data(layer);
@@ -135,8 +180,8 @@ static void main_window_load(Window *window) {
   int y = 0;
 
   GRect f1 = GRect(0, y, content_width, label_h);
-  s_label1_bg = make_colored_bg(root, f1, COLOR_SENSOR_1);
-  s_label1 = make_label(s_label1_bg, GRect(0, 0, content_width, label_h), "Euro95 - CBS-NL");
+  s_label1_bg = make_colored_bg(root, f1, g_color1);
+  s_label1 = make_label(s_label1_bg, GRect(0, 0, content_width, label_h), g_label1);
   y += label_h;
 
   GRect fp1 = GRect(0, y, content_width, price_h);
@@ -144,8 +189,8 @@ static void main_window_load(Window *window) {
   y += price_h;
 
   GRect f2 = GRect(0, y, content_width, label_h);
-  s_label2_bg = make_colored_bg(root, f2, COLOR_SENSOR_2);
-  s_label2 = make_label(s_label2_bg, GRect(0, 0, content_width, label_h), "Euro95 - VanRaak");
+  s_label2_bg = make_colored_bg(root, f2, g_color2);
+  s_label2 = make_label(s_label2_bg, GRect(0, 0, content_width, label_h), g_label2);
   y += label_h;
 
   GRect fp2 = GRect(0, y, content_width, price_h);
@@ -153,8 +198,8 @@ static void main_window_load(Window *window) {
   y += price_h;
 
   GRect f3 = GRect(0, y, content_width, label_h);
-  s_label3_bg = make_colored_bg(root, f3, COLOR_SENSOR_3);
-  s_label3 = make_label(s_label3_bg, GRect(0, 0, content_width, label_h), "Super+ - VanRaak");
+  s_label3_bg = make_colored_bg(root, f3, g_color3);
+  s_label3 = make_label(s_label3_bg, GRect(0, 0, content_width, label_h), g_label3);
   y += label_h;
 
   GRect fp3 = GRect(0, y, content_width, price_h);
@@ -193,6 +238,21 @@ static void refresh_price_labels(void) {
   strncpy((char *)layer_get_data(s_price3), buf, 15);
 }
 
+// Pushes the current g_label*/g_color* values onto the already-built UI -
+// used when new settings arrive from the phone after the window has loaded.
+static void apply_dynamic_settings(void) {
+  text_layer_set_text(s_label1, g_label1);
+  text_layer_set_text(s_label2, g_label2);
+  text_layer_set_text(s_label3, g_label3);
+
+  *(GColor *)layer_get_data(s_label1_bg) = g_color1;
+  *(GColor *)layer_get_data(s_label2_bg) = g_color2;
+  *(GColor *)layer_get_data(s_label3_bg) = g_color3;
+  layer_mark_dirty(s_label1_bg);
+  layer_mark_dirty(s_label2_bg);
+  layer_mark_dirty(s_label3_bg);
+}
+
 // ---- AppMessage ----
 
 void request_refresh(void) {
@@ -201,6 +261,19 @@ void request_refresh(void) {
     dict_write_uint8(iter, MESSAGE_KEY_REFRESH, 1);
     app_message_outbox_send();
   }
+}
+
+static void update_label(Tuple *t, char *dest, int pkey) {
+  if (!t) return;
+  strncpy(dest, t->value->cstring, LABEL_BUF_LEN - 1);
+  dest[LABEL_BUF_LEN - 1] = '\0';
+  persist_write_string(pkey, dest);
+}
+
+static void update_color(Tuple *t, GColor *dest, int pkey) {
+  if (!t) return;
+  dest->argb = t->value->uint8;
+  persist_write_int(pkey, (int)dest->argb);
 }
 
 static void inbox_received_handler(DictionaryIterator *iterator, void *context) {
@@ -219,6 +292,14 @@ static void inbox_received_handler(DictionaryIterator *iterator, void *context) 
     memcpy(g_history[2], t->value->data, NUM_DAYS * sizeof(uint16_t));
   }
 
+  update_label(dict_find(iterator, MESSAGE_KEY_LABEL1), g_label1, PKEY_LABEL1);
+  update_label(dict_find(iterator, MESSAGE_KEY_LABEL2), g_label2, PKEY_LABEL2);
+  update_label(dict_find(iterator, MESSAGE_KEY_LABEL3), g_label3, PKEY_LABEL3);
+  update_color(dict_find(iterator, MESSAGE_KEY_COLOR1), &g_color1, PKEY_COLOR1);
+  update_color(dict_find(iterator, MESSAGE_KEY_COLOR2), &g_color2, PKEY_COLOR2);
+  update_color(dict_find(iterator, MESSAGE_KEY_COLOR3), &g_color3, PKEY_COLOR3);
+
+  apply_dynamic_settings();
   refresh_price_labels();
   layer_mark_dirty(window_get_root_layer(s_main_window));
 }
@@ -235,6 +316,7 @@ static void outbox_failed_callback(DictionaryIterator *iterator, AppMessageResul
 
 static void init(void) {
   memset(g_history, 0, sizeof(g_history));
+  load_persisted_settings();
 
   s_main_window = window_create();
   window_set_click_config_provider(s_main_window, click_config_provider);
@@ -246,7 +328,9 @@ static void init(void) {
   app_message_register_inbox_received(inbox_received_handler);
   app_message_register_inbox_dropped(inbox_dropped_callback);
   app_message_register_outbox_failed(outbox_failed_callback);
-  app_message_open(256, 64);
+  // Bumped from 256: label text + colours added to every refresh payload
+  // alongside the three 60-byte history arrays.
+  app_message_open(512, 64);
 
   main_window_push();
 

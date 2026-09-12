@@ -7,9 +7,15 @@ function loadSettings() {
   return {
     haUrl: (localStorage.getItem('haUrl') || '').replace(/\/+$/, ''),
     haToken: localStorage.getItem('haToken') || '',
-    sensor1: localStorage.getItem('sensor1') || '', // Euro95 - CBS-NL
-    sensor2: localStorage.getItem('sensor2') || '', // Euro95 - VanRaak
-    sensor3: localStorage.getItem('sensor3') || ''  // Super+ - VanRaak
+    sensor1: localStorage.getItem('sensor1') || '',
+    sensor2: localStorage.getItem('sensor2') || '',
+    sensor3: localStorage.getItem('sensor3') || '',
+    label1: localStorage.getItem('label1') || 'Euro95 - CBS-NL',
+    label2: localStorage.getItem('label2') || 'Euro95 - VanRaak',
+    label3: localStorage.getItem('label3') || 'Super+ - VanRaak',
+    color1: localStorage.getItem('color1') || '#000055',
+    color2: localStorage.getItem('color2') || '#005500',
+    color3: localStorage.getItem('color3') || '#550000'
   };
 }
 
@@ -19,6 +25,24 @@ function saveSettings(cfg) {
   localStorage.setItem('sensor1', cfg.sensor1 || '');
   localStorage.setItem('sensor2', cfg.sensor2 || '');
   localStorage.setItem('sensor3', cfg.sensor3 || '');
+  localStorage.setItem('label1', cfg.label1 || '');
+  localStorage.setItem('label2', cfg.label2 || '');
+  localStorage.setItem('label3', cfg.label3 || '');
+  localStorage.setItem('color1', cfg.color1 || '');
+  localStorage.setItem('color2', cfg.color2 || '');
+  localStorage.setItem('color3', cfg.color3 || '');
+}
+
+// Packs a "#RRGGBB" colour into Pebble's 8-bit ARGB colour byte
+// (2 bits alpha, always opaque here, + 2 bits each for R/G/B).
+function hexToPebbleColorByte(hex) {
+  hex = (hex || '').replace('#', '');
+  if (hex.length !== 6) hex = '000000';
+  var r = parseInt(hex.substring(0, 2), 16);
+  var g = parseInt(hex.substring(2, 4), 16);
+  var b = parseInt(hex.substring(4, 6), 16);
+  function q(v) { return v < 64 ? 0 : v < 128 ? 1 : v < 192 ? 2 : 3; }
+  return 0xC0 | (q(r) << 4) | (q(g) << 2) | q(b); // 0xC0 = opaque alpha bits
 }
 
 // ---- day-bucket helpers ----
@@ -169,11 +193,17 @@ function toByteArray(dailyPrices) {
   return bytes;
 }
 
-function sendToWatch(hist1, hist2, hist3) {
+function sendToWatch(hist1, hist2, hist3, cfg) {
   var payload = {
     'HIST1': toByteArray(hist1),
     'HIST2': toByteArray(hist2),
-    'HIST3': toByteArray(hist3)
+    'HIST3': toByteArray(hist3),
+    'LABEL1': cfg.label1,
+    'LABEL2': cfg.label2,
+    'LABEL3': cfg.label3,
+    'COLOR1': hexToPebbleColorByte(cfg.color1),
+    'COLOR2': hexToPebbleColorByte(cfg.color2),
+    'COLOR3': hexToPebbleColorByte(cfg.color3)
   };
   Pebble.sendAppMessage(payload, function () {
     console.log('Sent price history to watch');
@@ -198,7 +228,7 @@ function refreshAndSend() {
     var h1 = results[cfg.sensor1] || new Array(NUM_DAYS).fill(0);
     var h2 = results[cfg.sensor2] || new Array(NUM_DAYS).fill(0);
     var h3 = results[cfg.sensor3] || new Array(NUM_DAYS).fill(0);
-    sendToWatch(h1, h2, h3);
+    sendToWatch(h1, h2, h3, cfg);
     refreshInFlight = false;
   });
 }
@@ -238,6 +268,20 @@ Pebble.addEventListener('webviewclosed', function (e) {
 // ---- config page (self-contained, no hosting required) ----
 
 function buildConfigHtml(cfg) {
+  function row(n, cfg) {
+    return (
+      '<div class="row">' +
+      '<h3>Row ' + n + '</h3>' +
+      '<label>Sensor entity ID</label>' +
+      '<input id="sensor' + n + '" placeholder="sensor.example_price" value="' + escapeAttr(cfg['sensor' + n]) + '">' +
+      '<label>Label text</label>' +
+      '<input id="label' + n + '" maxlength="23" value="' + escapeAttr(cfg['label' + n]) + '">' +
+      '<label>Banner colour</label>' +
+      '<input id="color' + n + '" type="color" value="' + escapeAttr(cfg['color' + n]) + '">' +
+      '</div>'
+    );
+  }
+
   return '<!DOCTYPE html><html><head><meta charset="utf-8">' +
     '<meta name="viewport" content="width=device-width, initial-scale=1">' +
     '<title>GasolineMan settings</title>' +
@@ -245,15 +289,19 @@ function buildConfigHtml(cfg) {
     'body{font-family:sans-serif;margin:0;padding:16px;background:#f4f4f4;}' +
     'h2{font-size:18px;margin-bottom:4px;}' +
     'p.hint{color:#666;font-size:12px;margin-top:0;}' +
-    'label{display:block;margin-top:14px;font-weight:bold;font-size:13px;}' +
-    'input{width:100%;box-sizing:border-box;padding:8px;margin-top:4px;' +
+    '.row{background:#fff;border-radius:6px;padding:12px 14px;margin-top:14px;' +
+    'border:1px solid #ddd;}' +
+    '.row h3{margin:0 0 4px 0;font-size:14px;}' +
+    'label{display:block;margin-top:10px;font-weight:bold;font-size:13px;}' +
+    'input[type=text],input:not([type]){width:100%;box-sizing:border-box;padding:8px;margin-top:4px;' +
     'border:1px solid #ccc;border-radius:4px;font-size:14px;}' +
-    '.swatch{display:inline-block;width:12px;height:12px;border-radius:2px;margin-right:6px;vertical-align:middle;}' +
+    'input[type=color]{width:100%;height:36px;margin-top:4px;padding:2px;' +
+    'border:1px solid #ccc;border-radius:4px;}' +
     'button{margin-top:22px;width:100%;padding:12px;background:#0a5;color:#fff;' +
     'border:none;border-radius:4px;font-size:16px;}' +
     '</style></head><body>' +
     '<h2>GasolineMan settings</h2>' +
-    '<p class="hint">Home Assistant connection and the three fuel price sensors.</p>' +
+    '<p class="hint">Home Assistant connection, and each row\'s sensor, label and colour.</p>' +
 
     '<label>Home Assistant URL</label>' +
     '<input id="haUrl" placeholder="https://your-ha-instance" value="' + escapeAttr(cfg.haUrl) + '">' +
@@ -261,14 +309,7 @@ function buildConfigHtml(cfg) {
     '<label>Long-Lived Access Token</label>' +
     '<input id="haToken" placeholder="token" value="' + escapeAttr(cfg.haToken) + '">' +
 
-    '<label><span class="swatch" style="background:#000055"></span>Euro95 - CBS-NL sensor entity ID</label>' +
-    '<input id="sensor1" placeholder="sensor.euro95_cbs_nl" value="' + escapeAttr(cfg.sensor1) + '">' +
-
-    '<label><span class="swatch" style="background:#005500"></span>Euro95 - VanRaak sensor entity ID</label>' +
-    '<input id="sensor2" placeholder="sensor.euro95_van_raak" value="' + escapeAttr(cfg.sensor2) + '">' +
-
-    '<label><span class="swatch" style="background:#550000"></span>Super+ - VanRaak sensor entity ID</label>' +
-    '<input id="sensor3" placeholder="sensor.super_plus_van_raak" value="' + escapeAttr(cfg.sensor3) + '">' +
+    row(1, cfg) + row(2, cfg) + row(3, cfg) +
 
     '<button onclick="save()">Save</button>' +
 
@@ -279,7 +320,13 @@ function buildConfigHtml(cfg) {
     'haToken:document.getElementById("haToken").value.trim(),' +
     'sensor1:document.getElementById("sensor1").value.trim(),' +
     'sensor2:document.getElementById("sensor2").value.trim(),' +
-    'sensor3:document.getElementById("sensor3").value.trim()' +
+    'sensor3:document.getElementById("sensor3").value.trim(),' +
+    'label1:document.getElementById("label1").value.trim(),' +
+    'label2:document.getElementById("label2").value.trim(),' +
+    'label3:document.getElementById("label3").value.trim(),' +
+    'color1:document.getElementById("color1").value,' +
+    'color2:document.getElementById("color2").value,' +
+    'color3:document.getElementById("color3").value' +
     '};' +
     'document.location = "pebblejs://close#" + encodeURIComponent(JSON.stringify(cfg));' +
     '}' +
