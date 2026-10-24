@@ -1,5 +1,6 @@
 var NUM_DAYS = 30;
 var PRICE_SCALE = 1000; // price stored on the watch as euros * 1000
+var MAX_RECENT = 10;    // how many recently used sensor IDs the settings page remembers
 
 // ---- settings ----
 
@@ -31,6 +32,29 @@ function saveSettings(cfg) {
   localStorage.setItem('color1', cfg.color1 || '');
   localStorage.setItem('color2', cfg.color2 || '');
   localStorage.setItem('color3', cfg.color3 || '');
+}
+
+// ---- recently used sensor IDs ----
+// One shared list for all three rows (most recent first), so a sensor you used
+// in one row can be picked again in any other row.
+
+function loadRecents() {
+  try {
+    var list = JSON.parse(localStorage.getItem('recentSensors') || '[]');
+    return Array.isArray(list) ? list : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function rememberSensors(ids) {
+  var list = loadRecents();
+  ids.forEach(function (id) {
+    if (!id) return;
+    list = list.filter(function (x) { return x !== id; });
+    list.unshift(id);
+  });
+  localStorage.setItem('recentSensors', JSON.stringify(list.slice(0, MAX_RECENT)));
 }
 
 // Packs a "#RRGGBB" colour into Pebble's 8-bit ARGB colour byte
@@ -248,7 +272,10 @@ Pebble.addEventListener('appmessage', function (e) {
 
 Pebble.addEventListener('showConfiguration', function () {
   var cfg = loadSettings();
-  var url = 'data:text/html;charset=utf-8,' + encodeURIComponent(buildConfigHtml(cfg));
+  // Make sure the sensors currently in use are in the recent list, so they can
+  // be picked again after switching away from them.
+  rememberSensors([cfg.sensor3, cfg.sensor2, cfg.sensor1]);
+  var url = 'data:text/html;charset=utf-8,' + encodeURIComponent(buildConfigHtml(cfg, loadRecents()));
   Pebble.openURL(url);
 });
 
@@ -259,6 +286,12 @@ Pebble.addEventListener('webviewclosed', function (e) {
   try {
     var cfg = JSON.parse(decodeURIComponent(e.response));
     saveSettings(cfg);
+    rememberSensors([cfg.sensor3, cfg.sensor2, cfg.sensor1]);
+    if (cfg.clearRecents) {
+      // "Clear list" was pressed: keep only the sensors now in use.
+      localStorage.setItem('recentSensors', '[]');
+      rememberSensors([cfg.sensor3, cfg.sensor2, cfg.sensor1]);
+    }
     refreshAndSend();
   } catch (err) {
     console.log('Could not parse config response: ' + err);
@@ -267,13 +300,20 @@ Pebble.addEventListener('webviewclosed', function (e) {
 
 // ---- config page (self-contained, no hosting required) ----
 
-function buildConfigHtml(cfg) {
+function buildConfigHtml(cfg, recents) {
+  var recentOptions = recents.map(function (id) {
+    return '<option value="' + escapeAttr(id) + '">' + escapeAttr(id) + '</option>';
+  }).join('');
+
   function row(n, cfg) {
     return (
       '<div class="row">' +
       '<h3>Row ' + n + '</h3>' +
       '<label>Sensor entity ID</label>' +
       '<input id="sensor' + n + '" placeholder="sensor.example_price" value="' + escapeAttr(cfg['sensor' + n]) + '">' +
+      '<select id="recent' + n + '" onchange="pick(' + n + ')">' +
+      '<option value="">Recently used sensors...</option>' + recentOptions +
+      '</select>' +
       '<label>Label text</label>' +
       '<input id="label' + n + '" maxlength="23" value="' + escapeAttr(cfg['label' + n]) + '">' +
       '<label>Banner colour</label>' +
@@ -297,8 +337,11 @@ function buildConfigHtml(cfg) {
     'border:1px solid #ccc;border-radius:4px;font-size:14px;}' +
     'input[type=color]{width:100%;height:36px;margin-top:4px;padding:2px;' +
     'border:1px solid #ccc;border-radius:4px;}' +
+    'select{width:100%;box-sizing:border-box;padding:7px;margin-top:6px;' +
+    'border:1px solid #ccc;border-radius:4px;font-size:13px;background:#fafafa;color:#444;}' +
     'button{margin-top:22px;width:100%;padding:12px;background:#0a5;color:#fff;' +
     'border:none;border-radius:4px;font-size:16px;}' +
+    'button.secondary{margin-top:10px;background:#888;font-size:13px;padding:8px;}' +
     '</style></head><body>' +
     '<h2>GasolineMan settings</h2>' +
     '<p class="hint">Home Assistant connection, and each row\'s sensor, label and colour.</p>' +
@@ -311,10 +354,16 @@ function buildConfigHtml(cfg) {
 
     row(1, cfg) + row(2, cfg) + row(3, cfg) +
 
-    '<button onclick="save()">Save</button>' +
+    '<button onclick="save(false)">Save</button>' +
+    '<button class="secondary" onclick="save(true)">Save and clear recent sensor list</button>' +
 
     '<script>' +
-    'function save(){' +
+    'function pick(n){' +
+    'var sel=document.getElementById("recent"+n);' +
+    'if(sel.value){document.getElementById("sensor"+n).value=sel.value;}' +
+    'sel.selectedIndex=0;' +
+    '}' +
+    'function save(clearRecents){' +
     'var cfg={' +
     'haUrl:document.getElementById("haUrl").value.trim(),' +
     'haToken:document.getElementById("haToken").value.trim(),' +
@@ -326,7 +375,8 @@ function buildConfigHtml(cfg) {
     'label3:document.getElementById("label3").value.trim(),' +
     'color1:document.getElementById("color1").value,' +
     'color2:document.getElementById("color2").value,' +
-    'color3:document.getElementById("color3").value' +
+    'color3:document.getElementById("color3").value,' +
+    'clearRecents:clearRecents' +
     '};' +
     'document.location = "pebblejs://close#" + encodeURIComponent(JSON.stringify(cfg));' +
     '}' +
